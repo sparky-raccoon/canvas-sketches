@@ -5,21 +5,23 @@ const Tweakpane = require('tweakpane');
 const _ = require('lodash');
 
 const imageObject = new Image();
-imageObject.src = path.join(__dirname, '../assets/img/earth.jpeg');
+imageObject.src = path.join(__dirname, '../assets/img/earth.jpg');
 
 const hiddenCanvas = document.createElement('canvas');
 const hiddenContext = hiddenCanvas.getContext('2d');
+
+document.getElementsByTagName('body')[0].style = "background-color:#000000;";
 
 let imageSizes;
 let imageData;
 let randomizedImageData;
 
-document.getElementsByTagName('body')[0].style = "background-color:#050505;";
-
 const params = {
-    resolution: 20,
-    weight: 2,
-    offset: 3,
+    resolution: 1,
+    weight: 0,
+    offset: 0,
+    mode: 'color',
+    treshold: 0,
 };
 
 const getRandomizedImageData = (data, glitchWeight, glitchOffset) => {
@@ -32,8 +34,12 @@ const getRandomizedImageData = (data, glitchWeight, glitchOffset) => {
             { value: false, weight: 1 },
         ]);
 
-        const offset = random.rangeFloor(1, glitchOffset);
-        const pixelData = isGlitchCandidate && p > offset ? getRGBAValues(p-offset) : getRGBAValues(p);
+        const offset = random.rangeFloor(-glitchOffset, glitchOffset);
+        let pixelData;
+        if (isGlitchCandidate && offset !== 0) {
+            if (p > offset) pixelData = getRGBAValues(p - offset);
+            else pixelData = getRGBAValues(p + offset);
+        } else pixelData = getRGBAValues(p);
 
         res.push(...pixelData);
     }
@@ -45,12 +51,20 @@ const createPane = (manager) => {
     const pane = new Tweakpane.Pane();
     let folder
 
-    folder = pane.addFolder({ title: 'Grid' });
-    folder.addInput(params, 'resolution', { min: 1, max: 400, step: 1 });
+    folder = pane.addFolder({ title: 'Image' });
+    folder.addInput(params, 'resolution', { min: 1, max: 200, step: 1 });
+    folder.addInput(params, 'mode', {
+        options: {
+            color: 'color',
+            grey: 'black-and-white',
+            treshold: 'treshold-on-greys',
+        }
+    })
+    folder.addInput(params, 'treshold', { min: 0, max: 255, step: 1 });
 
     folder = pane.addFolder({ title: 'Glitch' });
     folder.addInput(params, 'weight', { min: 0, max: 100, step: 1 });
-    folder.addInput(params, 'offset', { min: 1, max: 100, step: 1 });
+    folder.addInput(params, 'offset', { min: 0, max: 500, step: 1 });
 
     pane.on('change', _.debounce(() => manager.render(), 1000));
 };
@@ -69,23 +83,20 @@ imageObject.onload = async () => {
             const rows = Math.floor(height / cellSize);
             const totalCells = cols * rows;
     
-            console.log(cellSize);
-    
             hiddenCanvas.width = cols;
             hiddenCanvas.height = rows;
 
-            console.time('getImageData');
             hiddenContext.drawImage(imageObject, 0, 0, cols, rows);
             imageData = hiddenContext.getImageData(0, 0, cols, rows).data;
             randomizedImageData = getRandomizedImageData(imageData, params.weight, params.offset);
-            console.timeEnd('getImageData');
 
-            // let rValues = [];
+            const finalCellSizeWidth = Math.floor(width / cols);
+            const finalCellSizeHeight = Math.floor(height / rows);
 
-            const finalCellSizeWidth = cellSize // Math.ceil(width / cols);
-            const finalCellSizeHeight = cellSize // Math.ceil(height / rows);
+            const wDiff = width - finalCellSizeWidth * cols;
+            const hDiff = height - finalCellSizeHeight * rows;
+            context.translate(wDiff/2, hDiff/2);
 
-            console.time('context.fillRect');
             for (let i = 0; i < totalCells; i++) {
                 const col = i % cols;
                 const row = Math.floor(i / cols);
@@ -94,25 +105,21 @@ imageObject.onload = async () => {
                 const g = randomizedImageData[i * 4 + 1];
                 const b = randomizedImageData[i * 4 + 2]; 
                 const grey = (r + g + b) / 3;
-                // rValues.push(grey);
+                const filteredColor = grey < params.treshold ? 0 : 255;
+
+                let pixelColor = params.mode === 'color' ? `rgb(${r}, ${g}, ${b})` :
+                    params.mode === 'black-and-white' ? `rgb(${grey}, ${grey}, ${grey})` :
+                    `rgb(${filteredColor}, ${filteredColor}, ${filteredColor})`;
+
+                if (params.mode === 'treshold-on-greys' && filteredColor === 0) continue;
 
                 context.save();
                 context.translate(col * finalCellSizeWidth, row * finalCellSizeHeight);
-                const filteredColor = grey < 45 ? 0 : 255;
-                // context.fillStyle = `rgb(${filteredColor}, ${filteredColor}, ${filteredColor})`;
-                // context.fillStyle = `rgb(${grey}, ${grey}, ${grey})`;
-                context.fillStyle = `rgb(${r}, ${g}, ${b})`;
+                context.fillStyle = pixelColor;
                 context.fillRect(0, 0, finalCellSizeWidth, finalCellSizeHeight);
                 context.restore();
             }
-            console.timeEnd('context.fillRect');
-
-            // console.log('canvas size', width, height);
-            // console.log('image size', cols * cellSize, rows * cellSize);
-            /* console.log('average grey', rValues.reduce((acc, value) => {
-                return acc + (value / rValues.length)
-            }, 0)) */
         };
-    }, { dimensions: [ width, height ], animate: false });
+    }, { dimensions: [ width, height ] });
     createPane(manager);
 };
